@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.tools/
+data/
+*.db
+*.db-journal
+.env
+.env.local
+uploads/
+*.tsbuildinfo
+.freebuff/
+Agentic AI hackathon/
