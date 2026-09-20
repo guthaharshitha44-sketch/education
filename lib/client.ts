@@ -16,6 +16,6 @@ export async function api<T = any>(
   });
   let data: any = {};
   try { data = await res.json(); } catch { /* non-JSON (download endpoints) */ }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw new Error(data.message || data.error || `Request failed (${res.status})`);
   return data;
 }
