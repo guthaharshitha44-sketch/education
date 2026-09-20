@@ -1,18 +1,60 @@
-import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { randomUUID } from 'crypto';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+type SqliteDatabase = any;
 
-const dbPath = path.join(DATA_DIR, 'edupath.db');
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+let DatabaseConstructor: any = null;
+try {
+  DatabaseConstructor = require('better-sqlite3');
+} catch (err) {
+  console.warn('[db] Note: better-sqlite3 dynamic load deferred');
+}
 
-export function migrate() {
-  db.exec(`
+let dbInstance: SqliteDatabase | null = null;
+let migrated = false;
+
+function resolveDbPath(): string {
+  if (process.env.DATABASE_PATH) {
+    const customDir = path.dirname(process.env.DATABASE_PATH);
+    if (!fs.existsSync(customDir)) {
+      try {
+        fs.mkdirSync(customDir, { recursive: true });
+      } catch (err) {
+        console.warn('[db] Failed to create custom DATABASE_PATH dir, falling back to tmp:', err);
+        return path.join(os.tmpdir(), 'edupath.db');
+      }
+    }
+    return process.env.DATABASE_PATH;
+  }
+
+  // Detect serverless environment (Vercel, AWS Lambda, or read-only cwd)
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  if (isServerless) {
+    return path.join(os.tmpdir(), 'edupath.db');
+  }
+
+  // Local environment: attempt data/ directory first
+  const localDir = path.join(process.cwd(), 'data');
+  try {
+    if (!fs.existsSync(localDir)) {
+      fs.mkdirSync(localDir, { recursive: true });
+    }
+    const testFile = path.join(localDir, '.write-test');
+    fs.writeFileSync(testFile, '');
+    fs.unlinkSync(testFile);
+    return path.join(localDir, 'edupath.db');
+  } catch {
+    // If local directory is not writable (e.g. read-only container), fall back to OS temp dir
+    return path.join(os.tmpdir(), 'edupath.db');
+  }
+}
+
+export function migrate(targetDb?: SqliteDatabase) {
+  const instance = targetDb || dbInstance;
+  if (!instance) return;
+  instance.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
@@ -248,16 +290,55 @@ export function migrate() {
   `);
 }
 
-let migrated = false;
 export function getDb(): SqliteDatabase {
+  if (!dbInstance) {
+    const dbPath = resolveDbPath();
+    const dbDir = path.dirname(dbPath);
+    if (!fs.existsSync(dbDir)) {
+      try {
+        fs.mkdirSync(dbDir, { recursive: true });
+      } catch (err) {
+        console.warn('[db] Error creating db directory:', err);
+      }
+    }
+
+    // If using /tmp and a local seeded database exists in project, copy it over
+    const localDbPath = path.join(process.cwd(), 'data', 'edupath.db');
+    if (dbPath !== localDbPath && !fs.existsSync(dbPath) && fs.existsSync(localDbPath)) {
+      try {
+        fs.copyFileSync(localDbPath, dbPath);
+      } catch {
+        // Continue to fresh initialization if copy fails
+      }
+    }
+
+    if (!DatabaseConstructor) {
+      try {
+        DatabaseConstructor = require('better-sqlite3');
+      } catch (err) {
+        console.error('[db] Error loading better-sqlite3:', err);
+        throw new Error('Database driver unavailable. Please verify serverless deployment configuration.');
+      }
+    }
+    dbInstance = new DatabaseConstructor(dbPath);
+    try {
+      dbInstance.pragma('journal_mode = WAL');
+    } catch {
+      try {
+        dbInstance.pragma('journal_mode = DELETE');
+      } catch {
+        // Fallback for restricted storage
+      }
+    }
+    dbInstance.pragma('foreign_keys = ON');
+  }
+
   if (!migrated) {
-    migrate();
+    migrate(dbInstance);
     migrated = true;
   }
-  return db;
+  return dbInstance;
 }
-
-type SqliteDatabase = import('better-sqlite3').SqliteDatabase;
 
 export function uid(): string {
   return randomUUID();

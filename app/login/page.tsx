@@ -21,11 +21,32 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Login failed');
-      router.push(data.redirect || '/dashboard');
+
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+      }
+
+      if (!res.ok) {
+        const errorMsg =
+          data?.message ||
+          data?.error ||
+          (res.status >= 500 ? 'Server error occurred during sign in.' : 'Login failed');
+        throw new Error(errorMsg);
+      }
+
+      if (data && (data.success === false || data.ok === false)) {
+        throw new Error(data.message || data.error || 'Login failed');
+      }
+
+      router.push(data?.redirect || '/dashboard');
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'An unexpected error occurred.');
       setLoading(false);
     }
   }

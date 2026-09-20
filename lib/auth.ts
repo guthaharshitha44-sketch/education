@@ -22,19 +22,27 @@ function verifyPassword(password: string, stored: string): boolean {
   }
 }
 
+const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+
 export function createSession(res: any, userId: string) {
   const db = getDb();
   const token = randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000).toISOString();
   db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').run(token, userId, expires);
-  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`);
+  const secureFlag = isProd ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax${secureFlag}; Max-Age=${SESSION_DAYS * 86400}`);
 }
 
 export function destroySession(req: any, res: any) {
   const db = getDb();
   const token = parseCookie(req)[SESSION_COOKIE];
-  if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
-  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  if (token) {
+    try {
+      db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    } catch {}
+  }
+  const secureFlag = isProd ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax${secureFlag}; Max-Age=0`);
 }
 
 export function parseCookie(req: any): Record<string, string> {
@@ -66,22 +74,55 @@ export function getUser(req: any): { id: string; email: string; name: string; is
 export function requireUser(req: any, res: any): any | null {
   const user = getUser(req);
   if (!user) {
-    res.status(401).json({ ok: false, error: 'Not signed in.' });
+    res.status(401).json({ ok: false, success: false, message: 'Not signed in.', error: 'Not signed in.' });
     return null;
   }
   return user;
 }
 
+export class AuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthError';
+    Object.setPrototypeOf(this, AuthError.prototype);
+  }
+}
+
+export function isAuthError(e: any): e is AuthError {
+  return e instanceof AuthError || e?.name === 'AuthError';
+}
+
 export function signup(email: string, password: string, name: string) {
   const db = getDb();
-  email = email.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new AuthError('Please enter a valid email address.');
-  if (password.length < 8) throw new AuthError('Password must be at least 8 characters.');
+  email = (email || '').trim().toLowerCase();
+  name = (name || '').trim();
+
+  if (!name) {
+    throw new AuthError('Please enter your name.');
+  }
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new AuthError('Please enter a valid email address.');
+  }
+  if (!password || password.length < 8) {
+    throw new AuthError('Password must be at least 8 characters long.');
+  }
+
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (existing) throw new AuthError('An account with this email already exists. Try signing in.');
+  if (existing) {
+    throw new AuthError('Email already registered.');
+  }
+
   const id = uid();
-  db.prepare('INSERT INTO users (id, email, password_hash, name) VALUES (?,?,?,?)')
-    .run(id, email, hashPassword(password), name.trim() || 'Learner');
+  try {
+    db.prepare('INSERT INTO users (id, email, password_hash, name) VALUES (?,?,?,?)')
+      .run(id, email, hashPassword(password), name || 'Learner');
+  } catch (err: any) {
+    if (err?.message?.includes('UNIQUE') || err?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      throw new AuthError('Email already registered.');
+    }
+    console.error('[signup db insert error]', err);
+    throw err;
+  }
   return id;
 }
 
@@ -110,5 +151,3 @@ export function resetPassword(token: string, newPassword: string): boolean {
   db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.user_id);
   return true;
 }
-
-export class AuthError extends Error {}

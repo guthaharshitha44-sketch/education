@@ -22,11 +22,36 @@ export default function Signup() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Signup failed');
-      router.push('/onboarding');
+
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+      }
+
+      if (!res.ok) {
+        const errorMsg =
+          data?.message ||
+          data?.error ||
+          (res.status === 404
+            ? 'Registration endpoint not found (404). Please verify deployment.'
+            : res.status >= 500
+            ? 'Server error occurred during registration. Please try again.'
+            : `Registration failed with status ${res.status}`);
+        throw new Error(errorMsg);
+      }
+
+      if (data && (data.success === false || data.ok === false)) {
+        throw new Error(data.message || data.error || 'Signup failed');
+      }
+
+      router.push(data?.redirect || '/onboarding');
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'An unexpected error occurred.');
       setLoading(false);
     }
   }

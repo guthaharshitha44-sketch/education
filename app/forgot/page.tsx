@@ -18,35 +18,53 @@ export default function Forgot() {
   async function requestToken(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const res = await fetch('/api/auth/reset-request', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (data.ok && data.token) {
-      setToken(data.token);
-      setStage('confirm');
-      setMsg('Identity verified for the demo — set a new password below. (In production this token would be emailed.)');
-    } else if (data.ok) {
-      setMsg("If that email exists, a reset link has been sent. (Demo note: no email service is configured, so no token is shown.)");
-    } else {
-      setMsg(data.error || 'Something went wrong.');
+    try {
+      const res = await fetch('/api/auth/reset-request', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }),
+      });
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try { data = await res.json(); } catch { data = null; }
+      }
+      setLoading(false);
+      if (data && (data.ok || data.success) && data.token) {
+        setToken(data.token);
+        setStage('confirm');
+        setMsg('Identity verified for the demo — set a new password below. (In production this token would be emailed.)');
+      } else if (data && (data.ok || data.success)) {
+        setMsg("If that email exists, a reset link has been sent. (Demo note: no email service is configured, so no token is shown.)");
+      } else {
+        setMsg(data?.message || data?.error || 'Something went wrong.');
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setMsg(err?.message || 'Something went wrong.');
     }
   }
 
   async function confirmReset(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const res = await fetch('/api/auth/reset-confirm', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (data.ok) {
-      toast('Password updated. Sign in with your new password.', 'success');
-      router.push('/login');
-    } else {
-      setMsg(data.error || 'Reset failed.');
+    try {
+      const res = await fetch('/api/auth/reset-confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }),
+      });
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try { data = await res.json(); } catch { data = null; }
+      }
+      setLoading(false);
+      if (data && (data.ok || data.success)) {
+        toast('Password updated. Sign in with your new password.', 'success');
+        router.push('/login');
+      } else {
+        setMsg(data?.message || data?.error || 'Reset failed.');
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setMsg(err?.message || 'Reset failed.');
     }
   }
 

@@ -35,8 +35,12 @@ export default function Landing() {
     setDemoLoading(true);
     try {
       const res = await fetch('/api/auth/demo', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) router.push('/dashboard');
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try { data = await res.json(); } catch { data = null; }
+      }
+      if (data && (data.ok || data.success)) router.push('/dashboard');
       else setDemoLoading(false);
     } catch {
       setDemoLoading(false);

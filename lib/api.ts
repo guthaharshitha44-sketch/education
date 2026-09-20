@@ -2,12 +2,23 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { ZodSchema, ZodError } from 'zod';
 import { requireUser } from '@/lib/auth';
 
-export function ok(res: NextApiResponse, data: unknown) {
-  return res.status(200).json({ ok: true, ...(data as any) });
+export function ok(res: NextApiResponse, data: unknown = {}) {
+  const payload = typeof data === 'object' && data !== null ? data : { data };
+  return res.status(200).json({
+    ok: true,
+    success: true,
+    message: (payload as any).message || 'Success',
+    ...payload,
+  });
 }
 
 export function fail(res: NextApiResponse, status: number, error: string) {
-  return res.status(status).json({ ok: false, error });
+  return res.status(status).json({
+    ok: false,
+    success: false,
+    message: error,
+    error,
+  });
 }
 
 export function getMethod(req: NextApiRequest): string {
@@ -26,8 +37,8 @@ export function withUser(handler: Handler) {
       if (err instanceof ZodError) {
         return fail(res, 400, err.errors[0]?.message || 'Invalid input.');
       }
-      console.error('[api]', err);
-      return fail(res, 500, 'Something went wrong on our side. Your progress is safe — please try again.');
+      console.error('[api error]', err);
+      return fail(res, 500, err?.message || 'Something went wrong on our side. Your progress is safe — please try again.');
     }
   };
 }
@@ -40,14 +51,22 @@ export function publicHandler(handler: (ctx: { req: NextApiRequest; res: NextApi
       if (err instanceof ZodError) {
         return fail(res, 400, err.errors[0]?.message || 'Invalid input.');
       }
-      console.error('[api]', err);
-      return fail(res, 500, 'Something went wrong on our side. Please try again.');
+      console.error('[api error]', err);
+      return fail(res, 500, err?.message || 'Something went wrong on our side. Please try again.');
     }
   };
 }
 
 export function parseBody<T>(schema: ZodSchema<T>, req: NextApiRequest): T {
-  return schema.parse(req.body ?? {});
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      // let schema parse handle invalid input
+    }
+  }
+  return schema.parse(body ?? {});
 }
 
 // naive fixed-window rate limiter (per user or IP)
